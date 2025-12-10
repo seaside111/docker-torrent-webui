@@ -27,35 +27,35 @@
 复制以下命令并根据你的实际情况修改挂载路径：
 
     ```bash
-docker run -d \
-  --name torrent-webui \
-  --restart unless-stopped \
-  -p 5000:5000 \
-  -v /path/to/your/downloads:/data \
-  -e ADMIN_USER=admin \
-  -e ADMIN_PASS=password123 \
-  -e SECRET_KEY=your_secret_key \
-  seaside111/torrent-webui:latest
+       docker run -d \
+         --name torrent-webui \
+         --restart unless-stopped \
+         -p 5000:5000 \
+         -v /path/to/your/downloads:/data \
+         -e ADMIN_USER=admin \
+         -e ADMIN_PASS=password123 \
+         -e SECRET_KEY=your_secret_key \
+         seaside111/torrent-webui:latest
 
 方法二：使用 Docker Compose (NAS/高级用户推荐)
 
 创建一个 docker-compose.yml 文件：
 
     ```bash
-version: '3.8'
-services:
-  torrent-webui:
-    image: seaside111/torrent-webui:latest
-    container_name: torrent-webui
-    restart: unless-stopped
-    ports:
-      - "5000:5000"
-    volumes:
-      - /path/to/your/downloads:/data  # <--- 请将冒号左侧改为你服务器的真实路径
-    environment:
-      - ADMIN_USER=admin               # 自定义用户名
-      - ADMIN_PASS=password123         # 自定义密码
-      - SECRET_KEY=random_string       # Session 加密密钥 (建议修改)
+       version: '3.8'
+       services:
+         torrent-webui:
+           image: seaside111/torrent-webui:latest
+           container_name: torrent-webui
+           restart: unless-stopped
+           ports:
+             - "5000:5000"
+           volumes:
+             - /path/to/your/downloads:/data  # <--- 请将冒号左侧改为你服务器的真实路径
+           environment:
+             - ADMIN_USER=admin               # 自定义用户名
+             - ADMIN_PASS=password123         # 自定义密码
+             - SECRET_KEY=random_string       # Session 加密密钥 (建议修改)
 
 参数 (Flag)	  描述 (Description)	    备注
 -p 5000:5000	端口映射。	冒号左侧可自定义，右侧 5000 不可变。
