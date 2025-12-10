@@ -60,12 +60,12 @@
 参数详解
 
     ```bash
-参数 (Flag)	  描述 (Description)	    备注
--p 5000:5000	端口映射。	冒号左侧可自定义，右侧 5000 不可变。
--v /path:/data	目录挂载 (核心)。将宿主机的资源目录挂载到容器内。程序将在此目录读取视频并输出种子。	冒号左侧填真实路径，右侧 /data 严禁修改。
--e ADMIN_USER	WebUI 登录用户名。	
--e ADMIN_PASS	WebUI 登录密码。	
--e SECRET_KEY	Flask Session 密钥。	建议设置一个随机字符串以增强安全性。
+       参数 (Flag)	  描述 (Description)	    备注
+       -p 5000:5000	    端口映射。	      冒号左侧可自定义，右侧 5000 不可变。
+       -v /path:/data	目录挂载 (核心)。将宿主机的资源目录挂载到容器内。程序将在此目录读取视频并输出种子。	冒号左侧填真实路径，右侧 /data 严禁修改。
+       -e ADMIN_USER	WebUI 登录用户名。	
+       -e ADMIN_PASS	WebUI 登录密码。	
+       -e SECRET_KEY	Flask Session 密钥。	建议设置一个随机字符串以增强安全性。
 
 
 🚀 访问与使用
