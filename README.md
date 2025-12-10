@@ -14,11 +14,61 @@
 
 ## 🛠️ 安装指南 (Docker)
 
-### 方法一：使用 Docker CLI
+本镜像已发布至 Docker Hub，无需构建，直接拉取即可使用。
 
-你可以直接构建并运行容器：
+### 1. 拉取镜像
 
-1. **克隆代码**
-   ```bash
-   git clone [https://github.com/seaside111/docker-torrent-webui.git](https://github.com/seaside111/docker-torrent-webui.git)
-   cd docker-torrent-webui
+```bash
+docker pull seaside111/torrent-webui:latest
+
+### 2. 启动容器
+方法一：使用 Docker CLI (推荐)
+
+复制以下命令并根据你的实际情况修改挂载路径：
+
+```bash
+docker run -d \
+  --name torrent-webui \
+  --restart unless-stopped \
+  -p 5000:5000 \
+  -v /path/to/your/downloads:/data \
+  -e ADMIN_USER=admin \
+  -e ADMIN_PASS=password123 \
+  -e SECRET_KEY=your_secret_key \
+  seaside111/torrent-webui:latest
+
+方法二：使用 Docker Compose (NAS/高级用户推荐)
+
+创建一个 docker-compose.yml 文件：
+
+```bash
+version: '3.8'
+services:
+  torrent-webui:
+    image: seaside111/torrent-webui:latest
+    container_name: torrent-webui
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    volumes:
+      - /path/to/your/downloads:/data  # <--- 请将冒号左侧改为你服务器的真实路径
+    environment:
+      - ADMIN_USER=admin               # 自定义用户名
+      - ADMIN_PASS=password123         # 自定义密码
+      - SECRET_KEY=random_string       # Session 加密密钥 (建议修改)
+
+参数 (Flag)	  描述 (Description)	    备注
+-p 5000:5000	端口映射。	冒号左侧可自定义，右侧 5000 不可变。
+-v /path:/data	目录挂载 (核心)。将宿主机的资源目录挂载到容器内。程序将在此目录读取视频并输出种子。	冒号左侧填真实路径，右侧 /data 严禁修改。
+-e ADMIN_USER	WebUI 登录用户名。	
+-e ADMIN_PASS	WebUI 登录密码。	
+-e SECRET_KEY	Flask Session 密钥。	建议设置一个随机字符串以增强安全性。
+
+
+🚀 访问与使用
+
+    容器启动后，浏览器访问：http://你的服务器IP:5000
+
+    输入你设置的账号密码登录。
+
+    在路径栏输入相对于 /data 的路径（例如：若挂载了 /home/download 到 /data，且你要处理 /home/download/Movie，则只需填写 Movie）。
