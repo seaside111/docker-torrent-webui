@@ -18,15 +18,15 @@
 
 ### 1. 拉取镜像
 
-```bash
-docker pull seaside111/torrent-webui:latest
+    ```bash
+      docker pull seaside111/torrent-webui:latest
 
 ### 2. 启动容器
 方法一：使用 Docker CLI (推荐)
 
 复制以下命令并根据你的实际情况修改挂载路径：
 
-```bash
+    ```bash
 docker run -d \
   --name torrent-webui \
   --restart unless-stopped \
@@ -41,7 +41,7 @@ docker run -d \
 
 创建一个 docker-compose.yml 文件：
 
-```bash
+    ```bash
 version: '3.8'
 services:
   torrent-webui:
