@@ -20,5 +20,5 @@
 
 1. **克隆代码**
    ```bash
-   git clone [https://github.com/你的用户名/docker-torrent-webui.git](https://github.com/你的用户名/docker-torrent-webui.git)
+   git clone [https://github.com/seaside111/docker-torrent-webui.git](https://github.com/seaside111/docker-torrent-webui.git)
    cd docker-torrent-webui
