@@ -57,6 +57,8 @@
              - ADMIN_PASS=password123         # 自定义密码
              - SECRET_KEY=random_string       # Session 加密密钥 (建议修改)
 
+参数详解
+
     ```bash
 参数 (Flag)	  描述 (Description)	    备注
 -p 5000:5000	端口映射。	冒号左侧可自定义，右侧 5000 不可变。
