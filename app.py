@@ -25,10 +25,14 @@ task_store = {}
 # ==========================================
 
 def get_safe_path(rel_path):
+    # 如果传入为空或None，默认为根目录
+    if not rel_path: 
+        rel_path = ""
     clean_rel = rel_path.strip('/')
     abs_base = os.path.abspath(BASE_DIR)
     abs_target = os.path.abspath(os.path.join(abs_base, clean_rel))
-    if not abs_target.startswith(abs_base): raise ValueError("非法路径访问")
+    if not abs_target.startswith(abs_base): 
+        raise ValueError("非法路径访问")
     return abs_target
 
 def load_default_tracker():
@@ -199,7 +203,7 @@ def check_status():
     if task_id and task_id in task_store: return jsonify(task_store[task_id])
     return jsonify({'status': 'unknown'})
 
-# === 文件管理 API ===
+# === 文件管理 API (升级版) ===
 @app.route('/api/list_files', methods=['POST'])
 @login_required
 def list_files():
@@ -208,6 +212,12 @@ def list_files():
         full_path = get_safe_path(rel_path)
         if not os.path.exists(full_path): return jsonify({'success': False, 'msg': '路径不存在'})
         file_list = []
+        
+        # 返回当前文件夹的绝对路径的“相对部分”，用于前端导航确认
+        # 比如 full_path 是 /data/Movies, current_rel 就是 Movies
+        current_rel = os.path.relpath(full_path, BASE_DIR)
+        if current_rel == '.': current_rel = ""
+
         if os.path.isfile(full_path):
             file_list.append({'name': os.path.basename(full_path), 'type': 'file', 'size': os.path.getsize(full_path), 'is_txt': full_path.endswith('.txt')})
         else:
@@ -222,7 +232,7 @@ def list_files():
                     'is_txt': item.lower().endswith(('.txt', '.nfo', '.md'))
                 })
         file_list.sort(key=lambda x: (x['type'] != 'dir', x['name']))
-        return jsonify({'success': True, 'files': file_list})
+        return jsonify({'success': True, 'files': file_list, 'current_path': current_rel})
     except Exception as e: return jsonify({'success': False, 'msg': str(e)})
 
 @app.route('/api/file_op', methods=['POST'])
@@ -232,12 +242,15 @@ def file_op():
         data = request.json
         op_type = data.get('type')
         current_path = data.get('current_path', '')
+        
+        # 1. 单文件操作
         if op_type == 'delete':
             target = data.get('filename')
             full_target = get_safe_path(os.path.join(current_path, target))
             if os.path.isdir(full_target): shutil.rmtree(full_target)
             else: os.remove(full_target)
             return jsonify({'success': True})
+            
         elif op_type == 'rename':
             old_name = data.get('old_name'); new_name = data.get('new_name')
             if not new_name: return jsonify({'success': False, 'msg': '新文件名不能为空'})
@@ -245,6 +258,7 @@ def file_op():
             new_full = get_safe_path(os.path.join(current_path, new_name))
             os.rename(old_full, new_full)
             return jsonify({'success': True})
+            
         elif op_type == 'create_txt':
             filename = data.get('filename')
             if not filename: return jsonify({'success': False, 'msg': '文件名不能为空'})
@@ -253,20 +267,61 @@ def file_op():
             if os.path.exists(full_target): return jsonify({'success': False, 'msg': '文件已存在'})
             with open(full_target, 'w', encoding='utf-8') as f: f.write("")
             return jsonify({'success': True})
+            
         elif op_type == 'read_txt':
             filename = data.get('filename')
             full_target = get_safe_path(os.path.join(current_path, filename))
             with open(full_target, 'r', encoding='utf-8', errors='ignore') as f: content = f.read()
             return jsonify({'success': True, 'content': content})
+            
         elif op_type == 'save_txt':
             filename = data.get('filename'); content = data.get('content')
             full_target = get_safe_path(os.path.join(current_path, filename))
             with open(full_target, 'w', encoding='utf-8') as f: f.write(content)
             return jsonify({'success': True})
+
+        # 2. 批量操作 (新增)
+        elif op_type == 'batch_delete':
+            filenames = data.get('filenames', [])
+            if not filenames: return jsonify({'success': False, 'msg': '未选择文件'})
+            for name in filenames:
+                try:
+                    full_target = get_safe_path(os.path.join(current_path, name))
+                    if os.path.exists(full_target):
+                        if os.path.isdir(full_target): shutil.rmtree(full_target)
+                        else: os.remove(full_target)
+                except Exception as e: print(f"删除失败 {name}: {e}")
+            return jsonify({'success': True})
+
+        elif op_type == 'batch_move':
+            filenames = data.get('filenames', [])
+            dest_rel_path = data.get('destination', '').strip()
+            if not filenames: return jsonify({'success': False, 'msg': '未选择文件'})
+            if not dest_rel_path: return jsonify({'success': False, 'msg': '目标路径不能为空'})
+
+            # 目标文件夹必须存在，否则报错（防止误操作成重命名）
+            dest_full = get_safe_path(dest_rel_path)
+            if not os.path.exists(dest_full) or not os.path.isdir(dest_full):
+                 # 尝试自动创建目标文件夹
+                 try: os.makedirs(dest_full, exist_ok=True)
+                 except: return jsonify({'success': False, 'msg': '目标文件夹不存在且无法创建'})
+
+            success_count = 0
+            for name in filenames:
+                try:
+                    src_full = get_safe_path(os.path.join(current_path, name))
+                    # 防止移动到自己里面
+                    if src_full == dest_full: continue 
+                    shutil.move(src_full, dest_full)
+                    success_count += 1
+                except Exception as e: print(f"移动失败 {name}: {e}")
+            
+            return jsonify({'success': True, 'msg': f"成功移动 {success_count} 个项目"})
+
         return jsonify({'success': False, 'msg': '未知操作'})
     except Exception as e: return jsonify({'success': False, 'msg': str(e)})
 
-# === 任务提交 API (新) ===
+# === 任务提交 API ===
 @app.route('/api/submit_task', methods=['POST'])
 @login_required
 def submit_task():
@@ -288,7 +343,6 @@ def submit_task():
 
         output_folder = os.path.join(full_source_path, "torrent") if os.path.isdir(full_source_path) else os.path.join(os.path.dirname(full_source_path), "torrent")
         
-        # 使用 UUID 生成短 Task ID
         task_id = str(uuid.uuid4())[:8]
         
         t = threading.Thread(target=background_process, args=(

@@ -11,9 +11,16 @@
             border: 2px solid #ddd; border-radius: 5px; 
             box-shadow: 0 4px 8px rgba(0,0,0,0.1); display: block; margin: 0 auto;
         }
-        .file-icon { width: 20px; text-align: center; display: inline-block; margin-right: 5px; }
+        .file-icon { width: 20px; text-align: center; display: inline-block; margin-right: 5px; cursor: pointer; }
         .action-btn { padding: 2px 6px; font-size: 0.8rem; }
         #file-manager-section { display: none; transition: all 0.3s; }
+        /* 目录名称链接样式 */
+        .dir-link { color: #0d6efd; text-decoration: none; cursor: pointer; font-weight: bold; }
+        .dir-link:hover { text-decoration: underline; }
+        /* 批量操作栏 */
+        #batch-actions-bar { display: none; background: #e9ecef; border-bottom: 1px solid #dee2e6; padding: 8px; margin-bottom: 10px; border-radius: 5px; }
+        .breadcrumb-item { cursor: pointer; color: #0d6efd; }
+        .breadcrumb-item:hover { text-decoration: underline; }
     </style>
 </head>
 <body>
@@ -26,14 +33,6 @@
     <div class="card shadow-sm">
         <div class="card-body">
 
-            {% with messages = get_flashed_messages(with_categories=true) %}
-              {% if messages %}
-                {% for category, message in messages %}
-                  <div class="alert alert-{{ category }}">{{ message }}</div>
-                {% endfor %}
-              {% endif %}
-            {% endwith %}
-
             <div id="processing-box" class="alert alert-info" style="display: none;">
                 <div class="d-flex align-items-center">
                     <div class="spinner-border text-primary spinner-border-sm me-3" role="status"></div>
@@ -44,21 +43,19 @@
                 </div>
             </div>
 
-            {% if error_msg %}
-            <div class="alert alert-warning border-warning"><strong>⚠️ 部分任务未完成：</strong> {{ error_msg }}</div>
-            {% endif %}
-
             {% if download_path or mediainfo_link or shot_download_link %}
             <div class="text-center mb-4 border-bottom pb-4 bg-light rounded p-3">
                 {% if not error_msg %}<h4 class="text-success fw-bold mb-3">✅ 任务完成</h4>{% endif %}
+                {% if error_msg %}<div class="alert alert-warning">{{ error_msg }}</div>{% endif %}
+                
                 <div class="mb-3"><a href="/" class="btn btn-primary btn-lg px-4 shadow-sm">🔄 制作新种子 (返回首页)</a></div>
-                <p class="text-muted small">所有生成文件已覆盖保存至：/torrent 目录</p>
                 <div class="btn-group">
                     {% if download_path %}<a href="/download?file={{ download_path }}" class="btn btn-success">⬇️ 下载种子</a>{% endif %}
                     {% if mediainfo_link %}<a href="/download?file={{ mediainfo_link }}" class="btn btn-info text-white">⬇️ 下载 Info</a>{% endif %}
                     {% if shot_download_link %}<a href="/download?file={{ shot_download_link }}" class="btn btn-warning">⬇️ 下载截图包 (.zip)</a>{% endif %}
                 </div>
             </div>
+            
             <div class="row">
                 <div class="col-md-6">
                     <h6>MediaInfo:</h6>
@@ -66,16 +63,12 @@
                     <div class="bg-white p-2 border rounded" style="height: 500px; overflow-y: auto;">
                         <pre style="font-size: 0.75rem; white-space: pre-wrap;">{{ mediainfo_content }}</pre>
                     </div>
-                    {% else %}
-                    <div class="text-muted">无 MediaInfo 数据</div>
                     {% endif %}
                 </div>
                 <div class="col-md-6 text-center">
                     <h6>截图预览:</h6>
                     {% if shot_preview_link %}
                         <a href="{{ shot_preview_link }}" target="_blank"><img src="{{ shot_preview_link }}" class="thumb-preview" alt="预览图"></a>
-                    {% else %}
-                        <div class="alert alert-secondary mt-5">暂无预览图片</div>
                     {% endif %}
                 </div>
             </div>
@@ -91,16 +84,42 @@
                         <input type="text" id="input-path" name="path" class="form-control" placeholder="Movies/Avatar" required>
                         <button class="btn btn-outline-secondary" type="button" id="btn-scan-dir">📂 读取目录</button>
                     </div>
+                    <div class="form-text">输入路径后点击“读取”，可深入浏览文件夹。</div>
                 </div>
 
                 <div id="file-manager-section" class="mb-4 border rounded p-3 bg-white">
                     <div class="d-flex justify-content-between align-items-center mb-2">
-                        <h6 class="text-primary m-0">📁 目录内容管理 <small class="text-muted fw-normal" id="current-scan-path"></small></h6>
-                        <button type="button" class="btn btn-sm btn-success" onclick="openCreateTxtModal()">+ 新建文件</button>
+                        <nav aria-label="breadcrumb">
+                            <ol class="breadcrumb mb-0" id="path-breadcrumb">
+                                <li class="breadcrumb-item active">根目录</li>
+                            </ol>
+                        </nav>
+                        <div>
+                            <button type="button" class="btn btn-sm btn-outline-secondary me-1" onclick="goUpDir()">⬆️ 上一级</button>
+                            <button type="button" class="btn btn-sm btn-success" onclick="openCreateTxtModal()">+ 新建文件</button>
+                        </div>
                     </div>
+
+                    <div id="batch-actions-bar" class="d-flex align-items-center justify-content-between">
+                        <div>
+                            <span class="fw-bold text-primary">已选中 <span id="selected-count">0</span> 项</span>
+                        </div>
+                        <div>
+                            <button type="button" class="btn btn-sm btn-outline-primary me-2" onclick="openBatchMoveModal()">📦 批量移动</button>
+                            <button type="button" class="btn btn-sm btn-danger" onclick="batchDelete()">🗑️ 批量删除</button>
+                        </div>
+                    </div>
+
                     <div class="table-responsive">
                         <table class="table table-sm table-hover align-middle">
-                            <thead class="table-light"><tr><th>文件名</th><th style="width: 100px;">大小</th><th style="width: 160px; text-align: right;">操作</th></tr></thead>
+                            <thead class="table-light">
+                                <tr>
+                                    <th style="width: 30px;"><input type="checkbox" id="select-all-checkbox" onchange="toggleSelectAll()"></th>
+                                    <th>文件名</th>
+                                    <th style="width: 100px;">大小</th>
+                                    <th style="width: 160px; text-align: right;">操作</th>
+                                </tr>
+                            </thead>
                             <tbody id="file-list-body"></tbody>
                         </table>
                     </div>
@@ -167,9 +186,21 @@
                 <input type="hidden" id="rename-old-name">
                 <input type="text" class="form-control" id="rename-new-name">
             </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-primary" onclick="submitRename()">保存</button>
+            <div class="modal-footer"><button type="button" class="btn btn-primary" onclick="submitRename()">保存</button></div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="batchMoveModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header"><h5 class="modal-title">批量移动到...</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+            <div class="modal-body">
+                <label class="form-label">目标路径 (相对于 /data/)</label>
+                <input type="text" class="form-control" id="move-dest-path" placeholder="例如: Movies/Action">
+                <div class="form-text">如果文件夹不存在，将尝试自动创建。</div>
             </div>
+            <div class="modal-footer"><button type="button" class="btn btn-primary" onclick="submitBatchMove()">确定移动</button></div>
         </div>
     </div>
 </div>
@@ -183,9 +214,7 @@
                 <div class="mb-2"><strong>文件名:</strong> <span id="txt-filename-display"></span></div>
                 <textarea class="form-control" id="txt-content" rows="15" style="font-family: monospace;"></textarea>
             </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-primary" onclick="submitSaveTxt()">保存内容</button>
-            </div>
+            <div class="modal-footer"><button type="button" class="btn btn-primary" onclick="submitSaveTxt()">保存内容</button></div>
         </div>
     </div>
 </div>
@@ -195,12 +224,10 @@
         <div class="modal-content">
             <div class="modal-header"><h5 class="modal-title">新建文本文件</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
             <div class="modal-body">
-                <label class="form-label">文件名 (需带后缀，如 readme.nfo)</label>
+                <label class="form-label">文件名 (需带后缀)</label>
                 <input type="text" class="form-control" id="new-filename" placeholder="readme.nfo">
             </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-primary" onclick="submitCreateTxt()">创建</button>
-            </div>
+            <div class="modal-footer"><button type="button" class="btn btn-primary" onclick="submitCreateTxt()">创建</button></div>
         </div>
     </div>
 </div>
@@ -210,11 +237,12 @@
     const renameModal = new bootstrap.Modal(document.getElementById('renameModal'));
     const txtModal = new bootstrap.Modal(document.getElementById('txtModal'));
     const newFileModal = new bootstrap.Modal(document.getElementById('newFileModal'));
-    let currentScanPath = "";
-
-    // 页面加载后执行
+    const batchMoveModal = new bootstrap.Modal(document.getElementById('batchMoveModal'));
+    
+    let currentScanPath = ""; // 当前浏览的路径 (相对路径)
+    
+    // 初始化
     document.addEventListener("DOMContentLoaded", function() {
-        // 如果页面是带结果的（task_id），清理 URL 参数，保持地址栏干净
         if (window.location.search.includes('task_id')) {
             window.history.replaceState({}, document.title, "/");
         }
@@ -227,70 +255,8 @@
         return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
     }
 
-    // === 核心修改：AJAX 启动任务 ===
-    document.getElementById('start-task-btn').addEventListener('click', function() {
-        const form = document.getElementById('main-form');
-        if (!form.reportValidity()) return; // 触发浏览器的表单验证
-        
-        const formData = new FormData(form);
-        const submitBtn = document.getElementById('start-task-btn');
-        const processingBox = document.getElementById('processing-box');
-        
-        // 界面切换：隐藏表单，显示进度条
-        form.style.display = 'none';
-        processingBox.style.display = 'block';
-        
-        fetch('/api/submit_task', {
-            method: 'POST',
-            body: formData
-        })
-        .then(res => res.json())
-        .then(data => {
-            if (data.success) {
-                // 开始轮询状态
-                pollStatus(data.task_id);
-            } else {
-                alert("启动失败: " + data.msg);
-                form.style.display = 'block';
-                processingBox.style.display = 'none';
-            }
-        })
-        .catch(err => {
-            alert("请求错误: " + err);
-            form.style.display = 'block';
-            processingBox.style.display = 'none';
-        });
-    });
-
-    function pollStatus(taskId) {
-        const statusText = document.getElementById('status-text');
-        const pollInterval = setInterval(() => {
-            fetch(`/api/status?task_id=${taskId}`)
-                .then(response => response.json())
-                .then(data => {
-                    if (data.status === 'running') {
-                        statusText.innerText = data.msg;
-                    } else if (data.status === 'done') {
-                        clearInterval(pollInterval);
-                        statusText.innerText = "任务完成！正在刷新结果...";
-                        // 任务完成后刷新页面，带上 ID 以便后端渲染结果
-                        // 页面加载后的脚本会自动把这个 ID 从 URL 清除
-                        window.location.href = `/?task_id=${taskId}`;
-                    } else if (data.status === 'error') {
-                        clearInterval(pollInterval);
-                        alert("任务出错: " + data.msg);
-                        window.location.reload();
-                    }
-                })
-                .catch(err => console.error(err));
-        }, 2000);
-    }
-
-    // === 文件管理逻辑 ===
-    document.getElementById('btn-scan-dir').addEventListener('click', function() {
-        const path = document.getElementById('input-path').value;
-        if (!path) return alert("请输入路径");
-        
+    // === 核心：读取目录 ===
+    function loadDir(path) {
         fetch('/api/list_files', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
@@ -299,28 +265,106 @@
         .then(res => res.json())
         .then(data => {
             if (data.success) {
-                currentScanPath = path;
-                document.getElementById('current-scan-path').innerText = path;
+                currentScanPath = data.current_path; // 更新全局路径
+                document.getElementById('input-path').value = currentScanPath;
+                renderBreadcrumbs(currentScanPath);
                 renderFileList(data.files);
                 document.getElementById('file-manager-section').style.display = 'block';
+                updateBatchBar(); // 重置工具栏
             } else {
                 alert("读取失败: " + data.msg);
-                document.getElementById('file-manager-section').style.display = 'none';
             }
         });
+    }
+
+    // 绑定读取按钮
+    document.getElementById('btn-scan-dir').addEventListener('click', function() {
+        loadDir(document.getElementById('input-path').value);
     });
 
+    // 渲染面包屑
+    function renderBreadcrumbs(path) {
+        const breadcrumb = document.getElementById('path-breadcrumb');
+        breadcrumb.innerHTML = '';
+        
+        // 根目录
+        let liRoot = document.createElement('li');
+        liRoot.className = 'breadcrumb-item';
+        liRoot.innerText = 'Root';
+        liRoot.onclick = () => loadDir('');
+        breadcrumb.appendChild(liRoot);
+
+        if (!path) return;
+
+        const parts = path.split('/');
+        let accumPath = "";
+        parts.forEach((part, index) => {
+            if (!part) return;
+            accumPath += (accumPath ? '/' : '') + part;
+            let li = document.createElement('li');
+            li.className = 'breadcrumb-item';
+            // 如果是最后一个，设为 active
+            if (index === parts.length - 1) {
+                li.classList.add('active');
+                li.innerText = part;
+            } else {
+                li.innerText = part;
+                let target = accumPath; // 闭包
+                li.onclick = () => loadDir(target);
+            }
+            breadcrumb.appendChild(li);
+        });
+    }
+
+    // 返回上一级
+    function goUpDir() {
+        if (!currentScanPath) return; // 已经在根目录
+        const parts = currentScanPath.split('/');
+        parts.pop();
+        loadDir(parts.join('/'));
+    }
+
+    // 渲染文件列表 (带多选)
     function renderFileList(files) {
         const tbody = document.getElementById('file-list-body');
         tbody.innerHTML = '';
+        document.getElementById('select-all-checkbox').checked = false;
+
         if (files.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="3" class="text-center text-muted">空目录</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">空目录</td></tr>';
             return;
         }
 
         files.forEach(f => {
+            const tr = document.createElement('tr');
+            
+            // 1. 复选框列
+            const tdCheck = document.createElement('td');
+            tdCheck.innerHTML = `<input type="checkbox" class="file-checkbox form-check-input" value="${f.name}" onchange="updateBatchBar()">`;
+            tr.appendChild(tdCheck);
+
+            // 2. 文件名列
+            const tdName = document.createElement('td');
             let icon = f.type === 'dir' ? '📁' : '📄';
-            // 确保 type="button"
+            
+            if (f.type === 'dir') {
+                tdName.innerHTML = `<span class="file-icon">${icon}</span><span class="dir-link" onclick="loadDir('${currentScanPath ? currentScanPath + '/' : ''}${f.name}')">${f.name}</span>`;
+            } else {
+                tdName.innerHTML = `<span class="file-icon">${icon}</span>${f.name}`;
+            }
+            tr.appendChild(tdName);
+
+            // 3. 大小列
+            const tdSize = document.createElement('td');
+            tdSize.className = 'small text-muted';
+            tdSize.innerText = f.type === 'dir' ? '-' : formatSize(f.size);
+            tr.appendChild(tdSize);
+
+            // 4. 操作按钮列 (单文件操作)
+            const tdAction = document.createElement('td');
+            tdAction.style.textAlign = 'right';
+            tdAction.className = 'single-actions'; // 用于后面控制显示隐藏
+
             let actions = `
                 <button type="button" class="btn btn-outline-primary action-btn" onclick="openRename('${f.name}')">重命名</button>
                 <button type="button" class="btn btn-outline-danger action-btn" onclick="deleteFile('${f.name}')">删除</button>
@@ -331,19 +375,86 @@
                     ${actions}
                 `;
             }
+            tdAction.innerHTML = actions;
+            tr.appendChild(tdAction);
 
-            const tr = document.createElement('tr');
-            tr.innerHTML = `
-                <td><span class="file-icon">${icon}</span>${f.name}</td>
-                <td class="small text-muted">${f.type === 'dir' ? '-' : formatSize(f.size)}</td>
-                <td style="text-align: right;">${actions}</td>
-            `;
             tbody.appendChild(tr);
         });
     }
 
-    function reloadList() { document.getElementById('btn-scan-dir').click(); }
+    // === 多选逻辑 ===
+    function toggleSelectAll() {
+        const checked = document.getElementById('select-all-checkbox').checked;
+        document.querySelectorAll('.file-checkbox').forEach(cb => cb.checked = checked);
+        updateBatchBar();
+    }
 
+    function updateBatchBar() {
+        const checkboxes = document.querySelectorAll('.file-checkbox:checked');
+        const count = checkboxes.length;
+        document.getElementById('selected-count').innerText = count;
+        
+        const bar = document.getElementById('batch-actions-bar');
+        const singleActions = document.querySelectorAll('.single-actions');
+        
+        if (count > 0) {
+            bar.style.display = 'flex';
+            // 多选时，为了避免混淆，建议禁用单行操作，或者保持原样。
+            // 需求说 "多选时编辑功能不可用"，最简单的方法是隐藏所有单行按钮，或者让用户专注顶部的批量操作栏。
+            singleActions.forEach(el => el.style.visibility = 'hidden');
+        } else {
+            bar.style.display = 'none';
+            singleActions.forEach(el => el.style.visibility = 'visible');
+        }
+    }
+
+    function getSelectedFiles() {
+        return Array.from(document.querySelectorAll('.file-checkbox:checked')).map(cb => cb.value);
+    }
+
+    // === 批量操作 ===
+    function batchDelete() {
+        const files = getSelectedFiles();
+        if (files.length === 0) return;
+        if (!confirm(`确定要删除选中的 ${files.length} 个项目吗？`)) return;
+
+        fetch('/api/file_op', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({type: 'batch_delete', current_path: currentScanPath, filenames: files})
+        }).then(res => res.json()).then(data => {
+            if (data.success) loadDir(currentScanPath);
+            else alert(data.msg);
+        });
+    }
+
+    function openBatchMoveModal() {
+        if (getSelectedFiles().length === 0) return;
+        document.getElementById('move-dest-path').value = currentScanPath; // 默认填当前路径，方便修改
+        batchMoveModal.show();
+    }
+
+    function submitBatchMove() {
+        const files = getSelectedFiles();
+        const dest = document.getElementById('move-dest-path').value;
+        if (!dest) return alert("目标路径不能为空");
+
+        fetch('/api/file_op', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({type: 'batch_move', current_path: currentScanPath, filenames: files, destination: dest})
+        }).then(res => res.json()).then(data => {
+            if (data.success) {
+                alert(data.msg);
+                batchMoveModal.hide();
+                loadDir(currentScanPath);
+            } else {
+                alert("移动失败: " + data.msg);
+            }
+        });
+    }
+
+    // === 单文件操作 (保留原有逻辑) ===
     function deleteFile(name) {
         if (!confirm(`确定要永久删除 ${name} 吗？`)) return;
         fetch('/api/file_op', {
@@ -351,7 +462,7 @@
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({type: 'delete', current_path: currentScanPath, filename: name})
         }).then(res => res.json()).then(data => {
-            if (data.success) reloadList(); else alert(data.msg);
+            if (data.success) loadDir(currentScanPath); else alert(data.msg);
         });
     }
 
@@ -368,7 +479,7 @@
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({type: 'rename', current_path: currentScanPath, old_name: oldName, new_name: newName})
         }).then(res => res.json()).then(data => {
-            if (data.success) { renameModal.hide(); reloadList(); } else alert(data.msg);
+            if (data.success) { renameModal.hide(); loadDir(currentScanPath); } else alert(data.msg);
         });
     }
 
@@ -384,7 +495,7 @@
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({type: 'create_txt', current_path: currentScanPath, filename: name})
         }).then(res => res.json()).then(data => {
-            if (data.success) { newFileModal.hide(); reloadList(); } else alert(data.msg);
+            if (data.success) { newFileModal.hide(); loadDir(currentScanPath); } else alert(data.msg);
         });
     }
 
@@ -412,6 +523,59 @@
         }).then(res => res.json()).then(data => {
             if (data.success) { txtModal.hide(); alert("保存成功"); } else alert(data.msg);
         });
+    }
+
+    // === 启动做种任务 ===
+    document.getElementById('start-task-btn').addEventListener('click', function() {
+        const form = document.getElementById('main-form');
+        if (!form.reportValidity()) return; 
+        
+        const formData = new FormData(form);
+        const processingBox = document.getElementById('processing-box');
+        
+        form.style.display = 'none';
+        processingBox.style.display = 'block';
+        
+        fetch('/api/submit_task', {
+            method: 'POST',
+            body: formData
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.success) {
+                pollStatus(data.task_id);
+            } else {
+                alert("启动失败: " + data.msg);
+                form.style.display = 'block';
+                processingBox.style.display = 'none';
+            }
+        })
+        .catch(err => {
+            alert("请求错误: " + err);
+            form.style.display = 'block';
+            processingBox.style.display = 'none';
+        });
+    });
+
+    function pollStatus(taskId) {
+        const statusText = document.getElementById('status-text');
+        const pollInterval = setInterval(() => {
+            fetch(`/api/status?task_id=${taskId}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'running') {
+                        statusText.innerText = data.msg;
+                    } else if (data.status === 'done') {
+                        clearInterval(pollInterval);
+                        statusText.innerText = "任务完成！正在刷新结果...";
+                        window.location.href = `/?task_id=${taskId}`;
+                    } else if (data.status === 'error') {
+                        clearInterval(pollInterval);
+                        alert("任务出错: " + data.msg);
+                        window.location.reload();
+                    }
+                });
+        }, 2000);
     }
 </script>
 </body>
