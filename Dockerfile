@@ -9,8 +9,8 @@ RUN apt-get update && \
     apt-get install -y mktorrent mediainfo ffmpeg && \
     rm -rf /var/lib/apt/lists/*
 
-# 安装 Python 依赖
-RUN pip install --no-cache-dir flask
+# 安装 Python 依赖 (增加了 requests)
+RUN pip install --no-cache-dir flask requests
 
 # 复制当前目录代码
 COPY . .
