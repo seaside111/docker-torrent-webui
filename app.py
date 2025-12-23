@@ -6,10 +6,15 @@ import threading
 import zipfile
 import sys
 import uuid
+import datetime
+import re
 import requests
+from openai import OpenAI
 from functools import wraps
 from urllib.parse import unquote, unquote_plus
 from flask import Flask, render_template, request, send_file, flash, redirect, url_for, session, jsonify
+# 新增：用于多线程并发处理
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 app = Flask(__name__)
 
@@ -17,13 +22,29 @@ app = Flask(__name__)
 ADMIN_USERNAME = os.environ.get('ADMIN_USER', 'admin') 
 ADMIN_PASSWORD = os.environ.get('ADMIN_PASS', 'password123') 
 SECRET_KEY = os.environ.get('SECRET_KEY', 'seaside_secret_key')
+DEEPSEEK_API_KEY = os.environ.get('DEEPSEEK_API_KEY', '') 
+DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 
 BASE_DIR = "/data"
 CONFIG_FILE = os.path.join(BASE_DIR, '.tracker_config.json')
 
 app.secret_key = SECRET_KEY
-task_store = {}
-# ==========================================
+task_store = {} # 存储所有任务（做种 + 翻译）的状态和日志
+
+# ================= 辅助函数 =================
+
+def log_task(task_id, message):
+    """记录任务日志"""
+    timestamp = datetime.datetime.now().strftime("%H:%M:%S")
+    log_entry = f"[{timestamp}] {message}"
+    print(log_entry, flush=True) # 控制台打印
+    
+    if task_id in task_store:
+        # 存入内存供前端轮询
+        if 'logs' not in task_store[task_id]:
+            task_store[task_id]['logs'] = []
+        task_store[task_id]['logs'].append(log_entry)
+        task_store[task_id]['msg'] = message # 更新简短状态
 
 def get_safe_path(rel_path):
     if not rel_path: rel_path = ""
@@ -70,83 +91,158 @@ def get_video_duration(video_path):
         return float(val) if val else 0
     except: return 0
 
-# === 新增功能：提取字幕核心逻辑 ===
-def extract_subtitle_streams(video_path):
-    """
-    使用 FFprobe 分析视频包含的字幕流，并使用 FFmpeg 提取出来
-    """
+# === 翻译逻辑 (多线程优化版) ===
+def background_translate(task_id, file_path):
+    log_task(task_id, f"开始处理文件: {os.path.basename(file_path)}")
+    
+    if not DEEPSEEK_API_KEY:
+        log_task(task_id, "❌ 错误: 未配置 DeepSeek API Key")
+        task_store[task_id]['status'] = 'error'
+        return
+
+    client = OpenAI(api_key=DEEPSEEK_API_KEY, base_url=DEEPSEEK_BASE_URL)
+    filename = os.path.basename(file_path)
+    is_srt = filename.lower().endswith('.srt')
+    
     try:
-        # 1. 使用 ffprobe 获取流信息 (JSON格式)
-        cmd_probe = [
-            "ffprobe", "-v", "error", 
-            "-select_streams", "s", 
-            "-show_entries", "stream=index:stream_tags=language,title:stream=codec_name", 
-            "-of", "json", 
-            video_path
-        ]
-        result = subprocess.run(cmd_probe, capture_output=True, text=True)
-        # 如果没有字幕流，ffprobe 有时返回空或仅包含 headers
-        try:
-            data = json.loads(result.stdout)
-        except:
-            return False, "无法读取媒体信息"
-        
-        streams = data.get('streams', [])
-        if not streams:
-            return False, "未检测到字幕流"
+        # 读取文件内容
+        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+            full_content = f.read()
 
-        extracted_count = 0
-        base_name = os.path.splitext(video_path)[0] # 去掉后缀的完整路径
-        
-        # 2. 遍历每个字幕流进行提取
-        for stream in streams:
-            idx = stream.get('index')
-            codec = stream.get('codec_name', 'srt')
-            tags = stream.get('tags', {})
-            lang = tags.get('language', 'und') # 语言代码，如 eng, chi
-            
-            # 确定后缀名
-            ext = 'srt'
-            if 'ass' in codec or 'ssa' in codec: ext = 'ass'
-            elif 'pgs' in codec or 'hdmv' in codec: ext = 'sup' # 图片字幕
-            elif 'dvd' in codec or 'vob' in codec: ext = 'sub'
-            
-            # 构建输出文件名: 视频名.语言.索引.后缀
-            # 例如: Movie.chi.2.srt
-            out_name = f"{base_name}.{lang}.{idx}.{ext}"
-            
-            # 使用 ffmpeg 提取流 (stream mapping)
-            # -map 0:x 选中特定流，-c copy 直接复制不转码
-            cmd_extract = [
-                "ffmpeg", "-y", "-i", video_path, 
-                "-map", f"0:{idx}", 
-                "-c", "copy", 
-                out_name
-            ]
-            subprocess.run(cmd_extract, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            
-            if os.path.exists(out_name) and os.path.getsize(out_name) > 0:
-                extracted_count += 1
+        if not full_content.strip():
+            log_task(task_id, "文件内容为空，结束。")
+            task_store[task_id]['status'] = 'done'
+            return
 
-        return True, f"成功提取 {extracted_count} 条字幕"
+        blocks = []
+        if is_srt:
+            log_task(task_id, "检测到 SRT 字幕，正在按时间轴分块...")
+            # 统一换行符
+            full_content = full_content.replace('\r\n', '\n').replace('\r', '\n')
+            # 按双换行符分割 SRT 块
+            blocks = re.split(r'\n\s*\n', full_content)
+            blocks = [b.strip() for b in blocks if b.strip()]
+            log_task(task_id, f"解析完成，共 {len(blocks)} 个字幕段落。")
+        else:
+            log_task(task_id, "普通文本模式，按行处理...")
+            blocks = [line.strip() for line in full_content.split('\n') if line.strip()]
+
+        # 批处理配置
+        BATCH_SIZE = 30  # 每个请求包含的字幕块数量
+        total_batches = (len(blocks) + BATCH_SIZE - 1) // BATCH_SIZE
+        
+        # 定义处理单个批次的内部函数
+        def _process_batch(batch_index, batch_blocks):
+            """
+            处理单个批次的子函数，返回 (index, translated_text)
+            """
+            batch_input_text = "\n\n".join(batch_blocks)
+            
+            system_prompt = (
+                "你是一位精通多国语言的电影字幕翻译专家。我将发给你一段包含时间轴的 SRT 原文。"
+                "请结合上下文语境（Context），将对话内容翻译成流畅、地道的简体中文。"
+                "**严格遵守以下格式规则**："
+                "1. **绝对保留**原有的序号和时间轴，严禁修改数字。"
+                "2. 仅将时间轴下方的外语对话替换为中文翻译。"
+                "3. 保持原有的 SRT 格式结构（序号-时间-文本），段落之间用空行分隔。"
+                "4. 不要输出任何解释性文字，只输出翻译后的 SRT 内容。"
+            )
+            
+            retry_count = 0
+            while retry_count < 3:
+                try:
+                    response = client.chat.completions.create(
+                        model="deepseek-chat",
+                        messages=[
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": f"请翻译以下字幕片段:\n\n{batch_input_text}"},
+                        ],
+                        stream=False,
+                        temperature=1.3
+                    )
+                    res_raw = response.choices[0].message.content.strip()
+                    res_raw = res_raw.replace('```srt', '').replace('```', '').strip()
+                    
+                    if res_raw:
+                        return batch_index, res_raw
+                    else:
+                        raise ValueError("AI 返回内容为空")
+                except Exception as e:
+                    retry_count += 1
+            
+            # 失败兜底：返回原文，避免缺失
+            return batch_index, batch_input_text
+
+        # 准备所有批次数据
+        all_batches = []
+        for i in range(0, len(blocks), BATCH_SIZE):
+            batch_data = blocks[i:i + BATCH_SIZE]
+            batch_index = i // BATCH_SIZE
+            all_batches.append((batch_index, batch_data))
+
+        translated_results = [None] * len(all_batches) # 预分配槽位
+        completed_count = 0
+        
+        # 并发执行配置
+        MAX_WORKERS = 8 # 线程数，建议 5-10
+        
+        log_task(task_id, f"🚀 启动并发翻译，线程数: {MAX_WORKERS}，共 {total_batches} 个批次...")
+
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+            # 提交所有任务
+            future_to_batch = {
+                executor.submit(_process_batch, b_idx, b_data): b_idx 
+                for b_idx, b_data in all_batches
+            }
+            
+            for future in as_completed(future_to_batch):
+                b_idx = future_to_batch[future]
+                try:
+                    idx, content = future.result()
+                    translated_results[idx] = content
+                    completed_count += 1
+                    
+                    # 进度日志
+                    if completed_count % 5 == 0 or completed_count == total_batches:
+                         progress = (completed_count / total_batches) * 100
+                         log_task(task_id, f"进度: {progress:.1f}% ({completed_count}/{total_batches})")
+                         
+                except Exception as exc:
+                    log_task(task_id, f"❌ 批次 {b_idx} 异常: {exc}")
+                    translated_results[b_idx] = "\n\n".join(all_batches[b_idx][1])
+
+        # 检查并修复空值
+        if any(r is None for r in translated_results):
+             log_task(task_id, "⚠️ 警告：部分批次数据丢失，正在修复...")
+             for i, res in enumerate(translated_results):
+                 if res is None:
+                     translated_results[i] = "\n\n".join(all_batches[i][1])
+
+        # 保存文件
+        dir_name, base_name = os.path.split(file_path)
+        name_part, ext_part = os.path.splitext(base_name)
+        new_filename = f"{name_part}.chi{ext_part}"
+        new_path = os.path.join(dir_name, new_filename)
+
+        log_task(task_id, "翻译完成，正在拼接写入文件...")
+
+        final_content = "\n\n".join(translated_results)
+        with open(new_path, 'w', encoding='utf-8') as f:
+            f.write(final_content)
+
+        log_task(task_id, f"✅ 全部处理完毕！文件已保存为: {new_filename}")
+        task_store[task_id]['status'] = 'done'
+
     except Exception as e:
-        return False, str(e)
+        log_task(task_id, f"💀 致命错误: {str(e)}")
+        task_store[task_id]['status'] = 'error'
 
 def upload_to_pixhost(file_path):
-    """
-    上传单张图片到 Pixhost 并返回 [img]原图[/img] 格式
-    修改点：
-    1. 路径 /thumbs/ -> /images/
-    2. 域名 t1.pixhost.to -> img1.pixhost.to
-    """
     upload_url = "https://api.pixhost.to/images"
     try:
         with open(file_path, 'rb') as f:
             files = {'img': f}
-            data = {
-                "content_type": "0", 
-                "max_th_size": "400"
-            }
+            data = {"content_type": "0", "max_th_size": "400"}
             headers = {"Accept": "application/json"}
             
             response = requests.post(upload_url, files=files, data=data, headers=headers, timeout=60)
@@ -154,16 +250,10 @@ def upload_to_pixhost(file_path):
             if response.status_code == 200:
                 res_json = response.json()
                 th_url = res_json.get('th_url')
-                
                 if th_url:
                     th_url = th_url.replace('\\/', '/')
-                    
-                    # 1. 替换路径：从缩略图路径改为原图路径
                     full_url = th_url.replace('/thumbs/', '/images/')
-                    
-                    # 2. 替换域名：将 t1 改为 img1
                     full_url = full_url.replace('https://t', 'https://img')
-                    
                     return f"[img]{full_url}[/img]"
             else:
                 print(f"Pixhost Error: {response.text}")
@@ -175,7 +265,6 @@ def generate_screenshots(video_path, output_base_path, mode, quality):
     temp_dir = "/tmp/temp_thumbs_processing"
     settings_grid = {'small': (320, 15), 'medium': (640, 5), 'large': (1280, 2)}
     settings_full = {'medium': (1920, 1, ["-qmin", "1", "-qmax", "1"]), 'large': (0, 1, ["-qmin", "1", "-qmax", "1"])}
-    
     generated_images = []
 
     try:
@@ -233,6 +322,7 @@ def generate_screenshots(video_path, output_base_path, mode, quality):
         if os.path.exists(temp_dir): shutil.rmtree(temp_dir)
 
 def background_process(tracker_url, is_private, comment, piece_size, full_source_path, output_folder, task_id, shot_mode, shot_quality):
+    log_task(task_id, f"启动做种任务...")
     task_store[task_id] = {'status': 'running', 'msg': '初始化...', 'files': {}, 'bbcode': ''}
     try:
         if not os.path.exists(output_folder): os.makedirs(output_folder, exist_ok=True)
@@ -290,6 +380,28 @@ def background_process(tracker_url, is_private, comment, piece_size, full_source
     except Exception as e:
         task_store[task_id]['status'] = 'error'
         task_store[task_id]['msg'] = f"系统错误: {str(e)}"
+
+# === 字幕提取逻辑 ===
+def extract_subtitle_streams(video_path):
+    try:
+        cmd_probe = ["ffprobe", "-v", "error", "-select_streams", "s", "-show_entries", "stream=index:stream_tags=language,title:stream=codec_name", "-of", "json", video_path]
+        result = subprocess.run(cmd_probe, capture_output=True, text=True)
+        try: data = json.loads(result.stdout)
+        except: return False, "无法读取媒体信息"
+        streams = data.get('streams', [])
+        if not streams: return False, "未检测到字幕流"
+        count = 0
+        base_name = os.path.splitext(video_path)[0]
+        for stream in streams:
+            idx = stream.get('index'); codec = stream.get('codec_name', 'srt'); tags = stream.get('tags', {}); lang = tags.get('language', 'und')
+            ext = 'srt'
+            if 'ass' in codec: ext = 'ass'
+            elif 'pgs' in codec: ext = 'sup'
+            out_name = f"{base_name}.{lang}.{idx}.{ext}"
+            subprocess.run(["ffmpeg", "-y", "-i", video_path, "-map", f"0:{idx}", "-c", "copy", out_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            if os.path.exists(out_name): count += 1
+        return True, f"提取 {count} 条字幕"
+    except Exception as e: return False, str(e)
 
 # ================= 路由 =================
 def login_required(f):
@@ -354,12 +466,19 @@ def file_op():
         data = request.json
         op_type = data.get('type')
         current_path = data.get('current_path', '')
+        
+        user_key = data.get('api_key') 
+        if user_key: 
+            global DEEPSEEK_API_KEY
+            DEEPSEEK_API_KEY = user_key
+
         if op_type == 'delete':
             target = data.get('filename')
-            full_target = get_safe_path(os.path.join(current_path, target))
-            if os.path.isdir(full_target): shutil.rmtree(full_target)
-            else: os.remove(full_target)
+            full = get_safe_path(os.path.join(current_path, target))
+            if os.path.isdir(full): shutil.rmtree(full)
+            else: os.remove(full)
             return jsonify({'success': True})
+        
         elif op_type == 'rename':
             old_name = data.get('old_name'); new_name = data.get('new_name')
             if not new_name: return jsonify({'success': False, 'msg': '新文件名不能为空'})
@@ -367,6 +486,7 @@ def file_op():
             new_full = get_safe_path(os.path.join(current_path, new_name))
             os.rename(old_full, new_full)
             return jsonify({'success': True})
+        
         elif op_type == 'create_txt':
             filename = data.get('filename')
             if not filename: return jsonify({'success': False, 'msg': '文件名不能为空'})
@@ -375,29 +495,54 @@ def file_op():
             if os.path.exists(full_target): return jsonify({'success': False, 'msg': '文件已存在'})
             with open(full_target, 'w', encoding='utf-8') as f: f.write("")
             return jsonify({'success': True})
+        
         elif op_type == 'read_txt':
             filename = data.get('filename')
             full_target = get_safe_path(os.path.join(current_path, filename))
             with open(full_target, 'r', encoding='utf-8', errors='ignore') as f: content = f.read()
             return jsonify({'success': True, 'content': content})
+        
         elif op_type == 'save_txt':
             filename = data.get('filename'); content = data.get('content')
             full_target = get_safe_path(os.path.join(current_path, filename))
             with open(full_target, 'w', encoding='utf-8') as f: f.write(content)
             return jsonify({'success': True})
-        
-        # === 新增：处理提取字幕请求 ===
+
         elif op_type == 'extract_subs':
+            filename = data.get('filename')
+            full_target = get_safe_path(os.path.join(current_path, filename))
+            success, msg = extract_subtitle_streams(full_target)
+            return jsonify({'success': success, 'msg': msg})
+
+        # === 核心修改：翻译任务 ===
+        elif op_type == 'translate_sub':
             filename = data.get('filename')
             full_target = get_safe_path(os.path.join(current_path, filename))
             
             if not os.path.exists(full_target):
                 return jsonify({'success': False, 'msg': '文件不存在'})
-                
-            success, msg = extract_subtitle_streams(full_target)
-            return jsonify({'success': success, 'msg': msg})
-        # ================================
+            
+            # 生成任务 ID
+            task_id = str(uuid.uuid4())[:8]
+            
+            # 初始化任务状态
+            task_store[task_id] = {
+                'status': 'running', 
+                'msg': '准备开始翻译...', 
+                'logs': [], # 专门用于前端展示日志
+                'type': 'translation'
+            }
 
+            # 启动后台线程
+            t = threading.Thread(target=background_translate, args=(task_id, full_target))
+            t.start()
+            
+            return jsonify({
+                'success': True, 
+                'task_id': task_id, 
+                'msg': '任务已启动，请查看日志窗口。'
+            })
+        
         elif op_type == 'batch_delete':
             filenames = data.get('filenames', [])
             if not filenames: return jsonify({'success': False, 'msg': '未选择文件'})
@@ -409,6 +554,7 @@ def file_op():
                         else: os.remove(full_target)
                 except Exception as e: print(f"删除失败 {name}: {e}")
             return jsonify({'success': True})
+        
         elif op_type == 'batch_move':
             filenames = data.get('filenames', [])
             dest_rel_path = data.get('destination', '').strip()
@@ -427,8 +573,10 @@ def file_op():
                     success_count += 1
                 except Exception as e: print(f"移动失败 {name}: {e}")
             return jsonify({'success': True, 'msg': f"成功移动 {success_count} 个项目"})
+        
         return jsonify({'success': False, 'msg': '未知操作'})
-    except Exception as e: return jsonify({'success': False, 'msg': str(e)})
+    except Exception as e:
+        return jsonify({'success': False, 'msg': str(e)})
 
 @app.route('/api/submit_task', methods=['POST'])
 @login_required
@@ -475,7 +623,7 @@ def index():
         task_data = task_store[task_id]
         if task_data['status'] == 'done':
             if "失败" in task_data['msg']: error_msg = task_data['msg']
-            files = task_data['files']
+            files = task_data.get('files', {})
             if 'torrent' in files: download_link = files['torrent']
             if 'info' in files and os.path.exists(files['info']):
                 mediainfo_link = files['info']
@@ -522,4 +670,5 @@ def view_image():
     return "Image not found", 404
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+    app.config['JSON_AS_ASCII'] = False
+    app.run(host='0.0.0.0', port=5000, threaded=True)

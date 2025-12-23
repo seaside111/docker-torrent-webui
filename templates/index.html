@@ -6,11 +6,7 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
         body { background-color: #f8f9fa; padding-top: 20px; padding-bottom: 50px; }
-        .thumb-preview { 
-            max-width: 100%; max-height: 500px;
-            border: 2px solid #ddd; border-radius: 5px; 
-            box-shadow: 0 4px 8px rgba(0,0,0,0.1); display: block; margin: 0 auto;
-        }
+        .thumb-preview { max-width: 100%; max-height: 500px; border: 2px solid #ddd; border-radius: 5px; display: block; margin: 0 auto; }
         .file-icon { width: 20px; text-align: center; display: inline-block; margin-right: 5px; cursor: pointer; }
         .action-btn { padding: 2px 6px; font-size: 0.8rem; }
         #file-manager-section { display: none; transition: all 0.3s; }
@@ -19,6 +15,21 @@
         #batch-actions-bar { display: none; background: #e9ecef; border-bottom: 1px solid #dee2e6; padding: 8px; margin-bottom: 10px; border-radius: 5px; }
         .breadcrumb-item { cursor: pointer; color: #0d6efd; }
         .breadcrumb-item:hover { text-decoration: underline; }
+
+        /* 新增：日志控制台样式 */
+        .log-console {
+            background-color: #1e1e1e;
+            color: #00ff00;
+            font-family: 'Courier New', Courier, monospace;
+            padding: 15px;
+            height: 400px;
+            overflow-y: auto;
+            border-radius: 5px;
+            font-size: 0.85rem;
+            line-height: 1.4;
+        }
+        .log-entry { margin-bottom: 2px; border-bottom: 1px solid #333; }
+        .log-entry:last-child { border-bottom: none; }
     </style>
 </head>
 <body>
@@ -30,8 +41,7 @@
 
     <div class="card shadow-sm">
         <div class="card-body">
-
-            <div id="processing-box" class="alert alert-info" style="display: none;">
+             <div id="processing-box" class="alert alert-info" style="display: none;">
                 <div class="d-flex align-items-center">
                     <div class="spinner-border text-primary spinner-border-sm me-3" role="status"></div>
                     <div>
@@ -63,39 +73,7 @@
                     </div>
                     {% endif %}
                 </div>
-
-                <div class="col-md-4">
-                    <div class="d-flex justify-content-between align-items-center">
-                        <h6>Pixhost BBCode:</h6>
-                        {% if bbcode_content %}
-                        <button class="btn btn-sm btn-outline-secondary mb-1" onclick="copyBBCode()">复制代码</button>
-                        {% endif %}
-                    </div>
-                    {% if bbcode_content %}
-                    <textarea id="bbcode-area" class="form-control" style="height: 500px; font-size: 0.75rem; white-space: pre; font-family: monospace;" readonly>{{ bbcode_content }}</textarea>
-                    {% else %}
-                    <div class="bg-light text-center text-muted p-5 border rounded d-flex align-items-center justify-content-center" style="height: 500px;">
-                        <span>未生成图床链接<br><small>(可能无视频或上传失败)</small></span>
-                    </div>
-                    {% endif %}
                 </div>
-
-                <div class="col-md-4 text-center">
-                    <h6>本地截图预览:</h6>
-                    {% if shot_preview_link %}
-                        <a href="{{ shot_preview_link }}" target="_blank"><img src="{{ shot_preview_link }}" class="thumb-preview" alt="预览图"></a>
-                    {% endif %}
-                </div>
-            </div>
-            
-            <script>
-                function copyBBCode() {
-                    var copyText = document.getElementById("bbcode-area");
-                    copyText.select();
-                    document.execCommand("copy");
-                    alert("BBCode 代码已复制到剪贴板！");
-                }
-            </script>
             <hr>
             {% endif %}
 
@@ -113,11 +91,7 @@
 
                 <div id="file-manager-section" class="mb-4 border rounded p-3 bg-white">
                     <div class="d-flex justify-content-between align-items-center mb-2">
-                        <nav aria-label="breadcrumb">
-                            <ol class="breadcrumb mb-0" id="path-breadcrumb">
-                                <li class="breadcrumb-item active">根目录</li>
-                            </ol>
-                        </nav>
+                        <nav aria-label="breadcrumb"><ol class="breadcrumb mb-0" id="path-breadcrumb"><li class="breadcrumb-item active">根目录</li></ol></nav>
                         <div>
                             <button type="button" class="btn btn-sm btn-outline-secondary me-1" onclick="goUpDir()">⬆️ 上一级</button>
                             <button type="button" class="btn btn-sm btn-success" onclick="openCreateTxtModal()">+ 新建文件</button>
@@ -125,9 +99,7 @@
                     </div>
 
                     <div id="batch-actions-bar" class="d-flex align-items-center justify-content-between">
-                        <div>
-                            <span class="fw-bold text-primary">已选中 <span id="selected-count">0</span> 项</span>
-                        </div>
+                        <div><span class="fw-bold text-primary">已选中 <span id="selected-count">0</span> 项</span></div>
                         <div>
                             <button type="button" class="btn btn-sm btn-outline-primary me-2" onclick="openBatchMoveModal()">📦 批量移动</button>
                             <button type="button" class="btn btn-sm btn-danger" onclick="batchDelete()">🗑️ 批量删除</button>
@@ -141,7 +113,7 @@
                                     <th style="width: 30px;"><input type="checkbox" id="select-all-checkbox" onchange="toggleSelectAll()"></th>
                                     <th>文件名</th>
                                     <th style="width: 100px;">大小</th>
-                                    <th style="width: 160px; text-align: right;">操作</th>
+                                    <th style="width: 240px; text-align: right;">操作</th>
                                 </tr>
                             </thead>
                             <tbody id="file-list-body"></tbody>
@@ -202,56 +174,51 @@
     </div>
 </div>
 
-<div class="modal fade" id="renameModal" tabindex="-1">
+<div class="modal fade" id="renameModal" tabindex="-1"><div class="modal-dialog"><div class="modal-content"><div class="modal-header"><h5 class="modal-title">重命名</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><input type="hidden" id="rename-old-name"><input type="text" class="form-control" id="rename-new-name"></div><div class="modal-footer"><button type="button" class="btn btn-primary" onclick="submitRename()">保存</button></div></div></div></div>
+<div class="modal fade" id="batchMoveModal" tabindex="-1"><div class="modal-dialog"><div class="modal-content"><div class="modal-header"><h5 class="modal-title">批量移动</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><label class="form-label">目标路径</label><input type="text" class="form-control" id="move-dest-path"></div><div class="modal-footer"><button type="button" class="btn btn-primary" onclick="submitBatchMove()">确定</button></div></div></div></div>
+<div class="modal fade" id="txtModal" tabindex="-1"><div class="modal-dialog modal-lg"><div class="modal-content"><div class="modal-header"><h5 class="modal-title">编辑文件</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><input type="hidden" id="txt-filename"><textarea class="form-control" id="txt-content" rows="15"></textarea></div><div class="modal-footer"><button type="button" class="btn btn-primary" onclick="submitSaveTxt()">保存</button></div></div></div></div>
+<div class="modal fade" id="newFileModal" tabindex="-1"><div class="modal-dialog"><div class="modal-content"><div class="modal-header"><h5 class="modal-title">新建文件</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><input type="text" class="form-control" id="new-filename" placeholder="name.txt"></div><div class="modal-footer"><button type="button" class="btn btn-primary" onclick="submitCreateTxt()">创建</button></div></div></div></div>
+
+<div class="modal fade" id="translateConfigModal" tabindex="-1">
     <div class="modal-dialog">
         <div class="modal-content">
-            <div class="modal-header"><h5 class="modal-title">重命名</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
-            <div class="modal-body">
-                <input type="hidden" id="rename-old-name">
-                <input type="text" class="form-control" id="rename-new-name">
+            <div class="modal-header">
+                <h5 class="modal-title">🤖 AI 字幕翻译配置</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
-            <div class="modal-footer"><button type="button" class="btn btn-primary" onclick="submitRename()">保存</button></div>
+            <div class="modal-body">
+                <p>文件：<strong id="trans-filename-display" class="text-primary"></strong></p>
+                <div class="mb-3">
+                    <label class="form-label">DeepSeek API Key</label>
+                    <input type="password" class="form-control" id="deepseek-key-input" placeholder="如果不填，将使用环境变量">
+                </div>
+                <input type="hidden" id="trans-filename">
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button type="button" class="btn btn-warning" onclick="startTranslationTask()">🚀 启动翻译</button>
+            </div>
         </div>
     </div>
 </div>
 
-<div class="modal fade" id="batchMoveModal" tabindex="-1">
-    <div class="modal-dialog">
-        <div class="modal-content">
-            <div class="modal-header"><h5 class="modal-title">批量移动到...</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
-            <div class="modal-body">
-                <label class="form-label">目标路径 (相对于 /data/)</label>
-                <input type="text" class="form-control" id="move-dest-path" placeholder="例如: Movies/Action">
-                <div class="form-text">如果文件夹不存在，将尝试自动创建。</div>
-            </div>
-            <div class="modal-footer"><button type="button" class="btn btn-primary" onclick="submitBatchMove()">确定移动</button></div>
-        </div>
-    </div>
-</div>
-
-<div class="modal fade" id="txtModal" tabindex="-1">
+<div class="modal fade" id="logModal" data-bs-backdrop="static" data-bs-keyboard="false" tabindex="-1">
     <div class="modal-dialog modal-lg">
         <div class="modal-content">
-            <div class="modal-header"><h5 class="modal-title">编辑文本文件</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
-            <div class="modal-body">
-                <input type="hidden" id="txt-filename">
-                <div class="mb-2"><strong>文件名:</strong> <span id="txt-filename-display"></span></div>
-                <textarea class="form-control" id="txt-content" rows="15" style="font-family: monospace;"></textarea>
+            <div class="modal-header bg-dark text-white">
+                <h5 class="modal-title">📋 任务运行日志</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" id="log-modal-close" style="display: none;"></button>
             </div>
-            <div class="modal-footer"><button type="button" class="btn btn-primary" onclick="submitSaveTxt()">保存内容</button></div>
-        </div>
-    </div>
-</div>
-
-<div class="modal fade" id="newFileModal" tabindex="-1">
-    <div class="modal-dialog">
-        <div class="modal-content">
-            <div class="modal-header"><h5 class="modal-title">新建文本文件</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
-            <div class="modal-body">
-                <label class="form-label">文件名 (需带后缀)</label>
-                <input type="text" class="form-control" id="new-filename" placeholder="readme.nfo">
+            <div class="modal-body bg-dark p-0">
+                <div id="log-console-content" class="log-console">
+                    <div class="text-muted">正在连接日志流...</div>
+                </div>
             </div>
-            <div class="modal-footer"><button type="button" class="btn btn-primary" onclick="submitCreateTxt()">创建</button></div>
+            <div class="modal-footer bg-dark border-top-0">
+                <span id="log-status-indicator" class="spinner-border spinner-border-sm text-light me-2" role="status"></span>
+                <span class="text-white small" id="log-status-text">正在运行...</span>
+                <button type="button" class="btn btn-success btn-sm ms-3" id="log-finish-btn" style="display: none;" data-bs-dismiss="modal" onclick="loadDir(currentScanPath)">完成并刷新</button>
+            </div>
         </div>
     </div>
 </div>
@@ -262,9 +229,12 @@
     const txtModal = new bootstrap.Modal(document.getElementById('txtModal'));
     const newFileModal = new bootstrap.Modal(document.getElementById('newFileModal'));
     const batchMoveModal = new bootstrap.Modal(document.getElementById('batchMoveModal'));
+    const translateConfigModal = new bootstrap.Modal(document.getElementById('translateConfigModal'));
+    const logModal = new bootstrap.Modal(document.getElementById('logModal'));
     
-    let currentScanPath = ""; // 当前浏览的路径 (相对路径)
-    
+    let currentScanPath = ""; 
+    let logPollInterval = null;
+
     // 初始化
     document.addEventListener("DOMContentLoaded", function() {
         if (window.location.search.includes('task_id')) {
@@ -289,29 +259,26 @@
         .then(res => res.json())
         .then(data => {
             if (data.success) {
-                currentScanPath = data.current_path; // 更新全局路径
+                currentScanPath = data.current_path; 
                 document.getElementById('input-path').value = currentScanPath;
                 renderBreadcrumbs(currentScanPath);
                 renderFileList(data.files);
                 document.getElementById('file-manager-section').style.display = 'block';
-                updateBatchBar(); // 重置工具栏
+                updateBatchBar(); 
             } else {
                 alert("读取失败: " + data.msg);
             }
         });
     }
 
-    // 绑定读取按钮
     document.getElementById('btn-scan-dir').addEventListener('click', function() {
         loadDir(document.getElementById('input-path').value);
     });
 
-    // 渲染面包屑
     function renderBreadcrumbs(path) {
         const breadcrumb = document.getElementById('path-breadcrumb');
         breadcrumb.innerHTML = '';
         
-        // 根目录
         let liRoot = document.createElement('li');
         liRoot.className = 'breadcrumb-item';
         liRoot.innerText = 'Root';
@@ -327,28 +294,25 @@
             accumPath += (accumPath ? '/' : '') + part;
             let li = document.createElement('li');
             li.className = 'breadcrumb-item';
-            // 如果是最后一个，设为 active
             if (index === parts.length - 1) {
                 li.classList.add('active');
                 li.innerText = part;
             } else {
                 li.innerText = part;
-                let target = accumPath; // 闭包
+                let target = accumPath; 
                 li.onclick = () => loadDir(target);
             }
             breadcrumb.appendChild(li);
         });
     }
 
-    // 返回上一级
     function goUpDir() {
-        if (!currentScanPath) return; // 已经在根目录
+        if (!currentScanPath) return; 
         const parts = currentScanPath.split('/');
         parts.pop();
         loadDir(parts.join('/'));
     }
 
-    // 渲染文件列表 (带多选)
     function renderFileList(files) {
         const tbody = document.getElementById('file-list-body');
         tbody.innerHTML = '';
@@ -362,12 +326,10 @@
         files.forEach(f => {
             const tr = document.createElement('tr');
             
-            // 1. 复选框列
             const tdCheck = document.createElement('td');
             tdCheck.innerHTML = `<input type="checkbox" class="file-checkbox form-check-input" value="${f.name}" onchange="updateBatchBar()">`;
             tr.appendChild(tdCheck);
 
-            // 2. 文件名列
             const tdName = document.createElement('td');
             let icon = f.type === 'dir' ? '📁' : '📄';
             
@@ -378,18 +340,15 @@
             }
             tr.appendChild(tdName);
 
-            // 3. 大小列
             const tdSize = document.createElement('td');
             tdSize.className = 'small text-muted';
             tdSize.innerText = f.type === 'dir' ? '-' : formatSize(f.size);
             tr.appendChild(tdSize);
 
-            // 4. 操作按钮列 (单文件操作)
             const tdAction = document.createElement('td');
             tdAction.style.textAlign = 'right';
-            tdAction.className = 'single-actions'; // 用于后面控制显示隐藏
+            tdAction.className = 'single-actions'; 
 
-            // 基础按钮
             let actions = `
                 <button type="button" class="btn btn-outline-primary action-btn" onclick="openRename('${f.name}')">重命名</button>
                 <button type="button" class="btn btn-outline-danger action-btn" onclick="deleteFile('${f.name}')">删除</button>
@@ -403,7 +362,6 @@
             
             const lowerName = f.name.toLowerCase();
 
-            // === 视频提取字幕按钮 ===
             if (f.type !== 'dir' && (lowerName.endsWith('.mkv') || lowerName.endsWith('.mp4'))) {
                 actions = `
                     <button type="button" class="btn btn-outline-info action-btn" onclick="extractSubs('${f.name}')">提取字幕</button>
@@ -411,14 +369,23 @@
                 `;
             }
 
-            // === 新增：字幕下载按钮 ===
+            // === 字幕下载与翻译 ===
             const subExts = ['.srt', '.ass', '.ssa', '.sup', '.sub', '.vtt'];
             const isSubtitle = subExts.some(ext => lowerName.endsWith(ext));
 
             if (f.type !== 'dir' && isSubtitle) {
                 let fullPath = '/data/' + (currentScanPath ? currentScanPath + '/' : '') + f.name;
+                
+                let isTranslated = lowerName.includes('.chi.') || lowerName.includes('.zh.');
+                
+                let translateBtn = '';
+                if (['.srt', '.ass', '.ssa', '.vtt'].some(ext => lowerName.endsWith(ext)) && !isTranslated) {
+                    translateBtn = `<button type="button" class="btn btn-outline-warning action-btn ms-1" onclick="openTranslateConfig('${f.name}')">🇨🇳 翻译</button>`;
+                }
+
                 actions = `
                     <a href="/download?file=${encodeURIComponent(fullPath)}" class="btn btn-outline-secondary action-btn" title="下载字幕">⬇️ 下载</a>
+                    ${translateBtn}
                     ${actions}
                 `;
             }
@@ -430,7 +397,6 @@
         });
     }
 
-    // === 多选逻辑 ===
     function toggleSelectAll() {
         const checked = document.getElementById('select-all-checkbox').checked;
         document.querySelectorAll('.file-checkbox').forEach(cb => cb.checked = checked);
@@ -476,7 +442,7 @@
 
     function openBatchMoveModal() {
         if (getSelectedFiles().length === 0) return;
-        document.getElementById('move-dest-path').value = currentScanPath; // 默认填当前路径，方便修改
+        document.getElementById('move-dest-path').value = currentScanPath; 
         batchMoveModal.show();
     }
 
@@ -553,7 +519,6 @@
         }).then(res => res.json()).then(data => {
             if (data.success) {
                 document.getElementById('txt-filename').value = name;
-                document.getElementById('txt-filename-display').innerText = name;
                 document.getElementById('txt-content').value = data.content;
                 txtModal.show();
             } else alert(data.msg);
@@ -571,10 +536,8 @@
         });
     }
 
-    // === 新增：提取字幕 ===
     function extractSubs(name) {
         if (!confirm(`确定要从视频 "${name}" 中提取所有字幕吗？\n提取的字幕将保存在当前目录下。`)) return;
-        
         fetch('/api/file_op', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
@@ -582,17 +545,100 @@
         })
         .then(res => res.json())
         .then(data => {
-            if (data.success) {
-                alert("完成: " + data.msg);
-                loadDir(currentScanPath); 
-            } else {
-                alert("提取失败: " + data.msg);
-            }
+            if (data.success) { alert("完成: " + data.msg); loadDir(currentScanPath); } else { alert("提取失败: " + data.msg); }
         })
         .catch(err => alert("请求错误: " + err));
     }
 
-    // === 启动做种任务 ===
+    // === 翻译流程 ===
+    function openTranslateConfig(name) {
+        document.getElementById('trans-filename').value = name;
+        document.getElementById('trans-filename-display').innerText = name;
+        const savedKey = localStorage.getItem('deepseek_key');
+        if (savedKey) document.getElementById('deepseek-key-input').value = savedKey;
+        translateConfigModal.show();
+    }
+
+    function startTranslationTask() {
+        const name = document.getElementById('trans-filename').value;
+        const key = document.getElementById('deepseek-key-input').value.trim();
+        if (key) localStorage.setItem('deepseek_key', key);
+
+        translateConfigModal.hide();
+        
+        document.getElementById('log-console-content').innerHTML = '<div class="text-muted">> 初始化任务请求...</div>';
+        document.getElementById('log-status-indicator').style.display = 'inline-block';
+        document.getElementById('log-status-text').innerText = '正在启动...';
+        document.getElementById('log-finish-btn').style.display = 'none';
+        document.getElementById('log-modal-close').style.display = 'none';
+        logModal.show();
+
+        fetch('/api/file_op', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                type: 'translate_sub', 
+                current_path: currentScanPath, 
+                filename: name,
+                api_key: key
+            })
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.success) {
+                pollTaskLogs(data.task_id);
+            } else {
+                alert("启动失败: " + data.msg);
+                logModal.hide();
+            }
+        })
+        .catch(err => {
+            alert("网络错误: " + err);
+            logModal.hide();
+        });
+    }
+
+    function pollTaskLogs(taskId) {
+        if (logPollInterval) clearInterval(logPollInterval);
+        
+        const consoleDiv = document.getElementById('log-console-content');
+        let lastLogCount = 0;
+
+        logPollInterval = setInterval(() => {
+            fetch(`/api/status?task_id=${taskId}`)
+                .then(res => res.json())
+                .then(data => {
+                    if (data.logs && data.logs.length > lastLogCount) {
+                        const newLogs = data.logs.slice(lastLogCount);
+                        newLogs.forEach(log => {
+                            const p = document.createElement('div');
+                            p.className = 'log-entry';
+                            p.innerText = log;
+                            consoleDiv.appendChild(p);
+                        });
+                        lastLogCount = data.logs.length;
+                        consoleDiv.scrollTop = consoleDiv.scrollHeight;
+                    }
+
+                    if (data.status === 'done' || data.status === 'error') {
+                        clearInterval(logPollInterval);
+                        document.getElementById('log-status-indicator').style.display = 'none';
+                        document.getElementById('log-status-text').innerText = data.status === 'done' ? '任务完成' : '任务出错';
+                        document.getElementById('log-finish-btn').style.display = 'inline-block';
+                        document.getElementById('log-modal-close').style.display = 'block';
+                        
+                        if(data.status === 'done') {
+                            consoleDiv.innerHTML += '<div class="text-success fw-bold mt-2">> ✅ 全部完成！请点击下方按钮刷新列表。</div>';
+                        } else {
+                            consoleDiv.innerHTML += '<div class="text-danger fw-bold mt-2">> ❌ 发生错误，请检查上方日志。</div>';
+                        }
+                        consoleDiv.scrollTop = consoleDiv.scrollHeight;
+                    }
+                })
+                .catch(err => console.error("Poll error:", err));
+        }, 1000);
+    }
+
     document.getElementById('start-task-btn').addEventListener('click', function() {
         const form = document.getElementById('main-form');
         if (!form.reportValidity()) return; 
@@ -610,6 +656,7 @@
         .then(res => res.json())
         .then(data => {
             if (data.success) {
+                // 做种任务也可以复用 pollTaskLogs 逻辑，或者保留简单的 pollStatus
                 pollStatus(data.task_id);
             } else {
                 alert("启动失败: " + data.msg);
