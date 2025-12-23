@@ -24,11 +24,17 @@
 
 ## 🛠️ 安装指南 (Docker)
 
-### 方法一：使用 Docker CLI
 
 你可以直接构建并运行容器：
 
 1. **克隆代码**
    ```bash
-   git clone [https://github.com/seaside111/docker-torrent-webui.git](https://github.com/seaside111/docker-torrent-webui.git)
-   cd docker-torrent-webui
+   docker run -d \
+     --name torrent-webui \
+     --restart unless-stopped \
+     -p 5000:5000 \
+     -v /path/to/your/downloads:/data \
+     -e ADMIN_USER=admin \
+     -e ADMIN_PASS=password123 \
+     -e SECRET_KEY=your_secret_key \
+     seaside111/torrent-webui:latest
