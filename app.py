@@ -11,7 +11,8 @@ import re
 import requests
 from openai import OpenAI
 from functools import wraps
-from urllib.parse import unquote, unquote_plus
+# 新增 quote 用于编码路径
+from urllib.parse import unquote, unquote_plus, quote
 from flask import Flask, render_template, request, send_file, flash, redirect, url_for, session, jsonify
 # 新增：用于多线程并发处理
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -91,7 +92,7 @@ def get_video_duration(video_path):
         return float(val) if val else 0
     except: return 0
 
-# === 翻译逻辑 (多线程优化版) ===
+# === 翻译逻辑 (多线程并发优化版) ===
 def background_translate(task_id, file_path):
     log_task(task_id, f"开始处理文件: {os.path.basename(file_path)}")
     
@@ -128,10 +129,10 @@ def background_translate(task_id, file_path):
             blocks = [line.strip() for line in full_content.split('\n') if line.strip()]
 
         # 批处理配置
-        BATCH_SIZE = 30  # 每个请求包含的字幕块数量
+        BATCH_SIZE = 30  # 稍微减小一点单次请求量
         total_batches = (len(blocks) + BATCH_SIZE - 1) // BATCH_SIZE
         
-        # 定义处理单个批次的内部函数
+        # 定义独立的批次处理函数
         def _process_batch(batch_index, batch_blocks):
             """
             处理单个批次的子函数，返回 (index, translated_text)
@@ -170,7 +171,7 @@ def background_translate(task_id, file_path):
                 except Exception as e:
                     retry_count += 1
             
-            # 失败兜底：返回原文，避免缺失
+            # 失败兜底：返回原文
             return batch_index, batch_input_text
 
         # 准备所有批次数据
@@ -184,7 +185,7 @@ def background_translate(task_id, file_path):
         completed_count = 0
         
         # 并发执行配置
-        MAX_WORKERS = 8 # 线程数，建议 5-10
+        MAX_WORKERS = 8 # 建议设置在 5-10 之间
         
         log_task(task_id, f"🚀 启动并发翻译，线程数: {MAX_WORKERS}，共 {total_batches} 个批次...")
 
@@ -202,18 +203,18 @@ def background_translate(task_id, file_path):
                     translated_results[idx] = content
                     completed_count += 1
                     
-                    # 进度日志
+                    # 进度更新
                     if completed_count % 5 == 0 or completed_count == total_batches:
                          progress = (completed_count / total_batches) * 100
                          log_task(task_id, f"进度: {progress:.1f}% ({completed_count}/{total_batches})")
                          
                 except Exception as exc:
-                    log_task(task_id, f"❌ 批次 {b_idx} 异常: {exc}")
+                    log_task(task_id, f"❌ 批次 {b_idx} 发生异常: {exc}")
                     translated_results[b_idx] = "\n\n".join(all_batches[b_idx][1])
 
-        # 检查并修复空值
+        # 检查是否所有批次都成功
         if any(r is None for r in translated_results):
-             log_task(task_id, "⚠️ 警告：部分批次数据丢失，正在修复...")
+             log_task(task_id, "⚠️ 警告：部分批次可能丢失，正在尝试修复...")
              for i, res in enumerate(translated_results):
                  if res is None:
                      translated_results[i] = "\n\n".join(all_batches[i][1])
@@ -624,19 +625,25 @@ def index():
         if task_data['status'] == 'done':
             if "失败" in task_data['msg']: error_msg = task_data['msg']
             files = task_data.get('files', {})
-            if 'torrent' in files: download_link = files['torrent']
+            
+            # === 修复：对生成的文件链接进行 Quote 编码，防止特殊字符（如 %20）导致链接失效 ===
+            if 'torrent' in files: 
+                download_link = quote(files['torrent'])
             if 'info' in files and os.path.exists(files['info']):
-                mediainfo_link = files['info']
+                mediainfo_link = quote(files['info'])
                 try: 
                     with open(files['info'], 'r') as f: mediainfo_content = f.read()
                 except: pass
-            if 'shot_download' in files: shot_download_link = files['shot_download']
+            if 'shot_download' in files: 
+                shot_download_link = quote(files['shot_download'])
             
             img_path = None
             if 'shot_preview' in files:
                 p = files['shot_preview']
                 if isinstance(p, str) and os.path.exists(p): img_path = p
                 elif isinstance(p, list) and len(p) > 0 and os.path.exists(p[0]): img_path = p[0]
+            
+            # url_for 会自动处理编码，不需要手动 quote
             if img_path: shot_preview_link = url_for('view_image', path=img_path)
             
             bbcode_content = task_data.get('bbcode', '')
@@ -656,8 +663,15 @@ def index():
 def download_file():
     file_path = request.args.get('file')
     if file_path:
+        # === 修复：优先检查原始路径，如果不存在再尝试解码 ===
+        # 应对情况：文件名本身包含 %20 等字符
+        if os.path.exists(file_path): 
+            return send_file(file_path, as_attachment=True)
+            
         decoded = unquote(file_path)
-        if os.path.exists(decoded): return send_file(decoded, as_attachment=True)
+        if os.path.exists(decoded): 
+            return send_file(decoded, as_attachment=True)
+            
     return "文件未找到"
 
 @app.route('/view_image')
@@ -665,8 +679,15 @@ def download_file():
 def view_image():
     file_path = request.args.get('path')
     if not file_path: return "No path provided", 400
+    
+    # === 修复：同上，优先检查原始路径 ===
+    if os.path.exists(file_path): 
+        return send_file(file_path, mimetype='image/jpeg')
+
     decoded_path = unquote_plus(file_path)
-    if os.path.exists(decoded_path): return send_file(decoded_path, mimetype='image/jpeg')
+    if os.path.exists(decoded_path): 
+        return send_file(decoded_path, mimetype='image/jpeg')
+        
     return "Image not found", 404
 
 if __name__ == '__main__':
